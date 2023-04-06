@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Map Animation</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <style>
+        #map {
+            height: calc(100vh - 25px);
+            width: 100%;
+        }
+
+        #date-display {
+            display: inline;
+            margin-left: 25px;
+        }
+        #results {
+          position: absolute;
+          background-color: white;
+          border: 1px solid #ccc;
+          display: none;
+          max-height: 200px;
+          overflow-y: auto;
+          width: 100%;
+        }
+        .result-item {
+          padding: 5px;
+          cursor: pointer;
+        }
+        .result-item:hover {
+          background-color: #eee;
+        }
+        .search-container{
+          position: fixed;
+          top: 18px;
+          left: 70px;
+          z-index: 1500;
+        }
+        #search {
+          width: 400px;
+          height: 25px;
+        }
+        #taxon-observation-details {
+          position: relative;
+          top: -15px;
+          left: 10px;
+        }
+        .bottom-bar {
+          position: relative;
+          top: -45px;
+          left: 5px;
+          z-index: 1500;
+        }
+        #play {
+          padding: 10px;
+          border-radius: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="search-container">
+        <input type="text" id="search" autocomplete="off" placeholder="Search for a species">
+        <div id="results"></div>
+        <p id="taxon-observation-details"></p>
+    </div>
+    <div id="map"></div>
+    <div class="bottom-bar">
+      <button id="play">Animate</button>
+      <p id="date-display"></p>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
+    <script>
+      const search = document.getElementById('search');
+      const results = document.getElementById('results');
+      const taxonObservationDetails = document.getElementById('taxon-observation-details');
+      let observations = [];
+
+      search.addEventListener('input', async () => {
+        const query = search.value;
+        if (query.length > 0) {
+          const apiUrl = `https://api.inaturalist.org/v1/taxa/autocomplete?q=${query}&per_page=10`;
+          const response = await fetch(apiUrl);
+          const data = await response.json();
+          populateResults(data.results);
+        } else {
+          results.style.display = 'none';
+        }
+      });
+
+      function populateResults(species) {
+        results.innerHTML = '';
+        species.forEach(s => {
+          const item = document.createElement('div');
+          item.classList.add('result-item');
+          item.innerHTML = `<img src=${s.default_photo.square_url} /><p style="font-style: italic; display: inline;"> ${s.preferred_common_name} (${s.name})</p>`;
+          item.addEventListener('click', async () => {
+            observations = [];
+            search.value = item.textContent;
+            results.style.display = 'none';
+            await fetchTaxonObservations(s.id, 1);
+          });
+          results.appendChild(item);
+        });
+        results.style.display = species.length > 0 ? 'block' : 'none';
+      }
+
+      async function fetchTaxonObservations(taxonId, page) {
+        const perPage = 200
+        const apiUrl = `https://api.inaturalist.org/v1/observations?verifiable=true&taxon_id=${taxonId}&page=${page}&per_page=${perPage}&order=desc&order_by=created_at`;
+        const response = await fetch(apiUrl);
+        const data = await response.json();
+        data.results.forEach((observation) => {
+          if (observation.location && observation.observed_on) {
+            let [lat, lng] = observation.location.split(',');
+            observations.push({lat: lat, lng: lng, date: observation.observed_on})
+          }
+        });
+        taxonObservationDetails.textContent = `Fetched ${observations.length} observations of ${data.total_results} total observations`;
+        if ((data.total_results / perPage) > page) {
+          fetchTaxonObservations(taxonId, page + 1)
+        } else {
+          taxonObservationDetails.textContent = `Fetched ${data.total_results} observations of ${data.total_results} total observations`;
+        }
+      }
+
+      // Create the map
+      const map = L.map('map').setView([0, 0], 2);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+      }).addTo(map);
+
+      // Function to add markers
+      function addMarkers(observations) {
+          observations.forEach(observation => {
+              L.circleMarker([observation.lat, observation.lng], {
+                  radius: 5,
+                  fillColor: "#ff7800",
+                  color: "#000",
+                  weight: 1,
+                  opacity: 0.4,
+                  fillOpacity: 0.4
+              }).addTo(map);
+          });
+      }
+
+      // Function to filter observations by month
+      function filterObservationsByMonth(observations, month) {
+        return observations.filter(observation => moment(observation.date).month() === month);
+      }
+
+      // Update date display
+      function updateDateDisplay(month) {
+          const dateDisplay = document.getElementById('date-display');
+          const startDate = moment().month(month).startOf('month').format('MM-DD');
+          const endDate = moment().month(month).endOf('month').format('MM-DD');
+          dateDisplay.textContent = `Displaying observations between ${startDate} and ${endDate}.`;
+      }
+
+      // Play/Stop button functionality
+      const playButton = document.getElementById('play');
+      let intervalId = null;
+
+      playButton.addEventListener('click', () => {
+          if (playButton.textContent === 'Animate') {
+              playButton.textContent = 'Stop';
+              let currentMonth = 0;
+              const totalMonths = 12;
+
+              intervalId = setInterval(() => {
+                  map.eachLayer(layer => {
+                      if (layer instanceof L.CircleMarker) {
+                          map.removeLayer(layer);
+                      }
+                  });
+
+                  const filteredObservations = filterObservationsByMonth(observations, currentMonth);
+                  addMarkers(filteredObservations);
+                  updateDateDisplay(currentMonth);
+
+                  currentMonth++;
+                  if (currentMonth === totalMonths) {
+                      currentMonth = 0;
+                  }
+              }, 1000);
+          } else {
+              playButton.textContent = 'Play';
+              clearInterval(intervalId);
+          }
+      });
+    </script>
+</body>
+</html>
