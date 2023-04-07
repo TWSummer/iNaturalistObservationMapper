@@ -5,9 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Map Animation</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/14.7.0/nouislider.min.css" />
     <style>
         #map {
-            height: calc(100vh - 25px);
+            height: calc(100vh - 75px);
             width: 100%;
         }
 
@@ -46,15 +47,15 @@
           top: -15px;
           left: 10px;
         }
-        .bottom-bar {
-          position: relative;
-          top: -45px;
-          left: 5px;
-          z-index: 1500;
+        #play-pause {
+            position: absolute;
+            left: 1rem;
+            font-size: 2rem;
+            cursor: pointer;
         }
-        #play {
-          padding: 10px;
-          border-radius: 10px;
+        #slider {
+            width: 90%;
+            margin: 0 auto;
         }
     </style>
 </head>
@@ -65,13 +66,13 @@
         <p id="taxon-observation-details"></p>
     </div>
     <div id="map"></div>
-    <div class="bottom-bar">
-      <button id="play">Animate</button>
-      <p id="date-display"></p>
+    <div id="slider-container">
+        <span id="play-pause">&#9658;</span>
+        <div id="slider"></div>
     </div>
-
     <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/14.7.0/nouislider.min.js"></script>
     <script>
       const search = document.getElementById('search');
       const results = document.getElementById('results');
@@ -151,23 +152,52 @@
         return observations.filter(observation => moment(observation.date).month() === month);
       }
 
-      // Update date display
-      function updateDateDisplay(month) {
-          const dateDisplay = document.getElementById('date-display');
-          const startDate = moment().month(month).startOf('month').format('MM-DD');
-          const endDate = moment().month(month).endOf('month').format('MM-DD');
-          dateDisplay.textContent = `Displaying observations between ${startDate} and ${endDate}.`;
-      }
+      // Create the slider
+      const slider = document.getElementById('slider');
+      const totalMonths = 12;
 
-      // Play/Stop button functionality
-      const playButton = document.getElementById('play');
+      noUiSlider.create(slider, {
+          start: 0,
+          step: 1,
+          range: {
+              min: 0,
+              max: totalMonths - 1
+          },
+          pips: {
+              mode: 'steps',
+              density: 8,
+              format: {
+                  to: value => {
+                      const monthIndex = Math.round(value);
+                      return moment().month(monthIndex).format('MMM');
+                  },
+                  from: value => moment(value, 'MMM').month()
+              }
+          }
+      });
+
+      // Slider event handling
+      slider.noUiSlider.on('change', value => {
+          const month = parseInt(value);
+
+          map.eachLayer(layer => {
+              if (layer instanceof L.CircleMarker) {
+                  map.removeLayer(layer);
+              }
+          });
+
+          const filteredObservations = filterObservationsByMonth(observations, month);
+          addMarkers(filteredObservations);
+      });
+
+      // Play/pause functionality
+      const playPauseButton = document.getElementById('play-pause');
       let intervalId = null;
 
-      playButton.addEventListener('click', () => {
-          if (playButton.textContent === 'Animate') {
-              playButton.textContent = 'Stop';
-              let currentMonth = 0;
-              const totalMonths = 12;
+      playPauseButton.addEventListener('click', () => {
+          if (playPauseButton.textContent === '►') {
+              playPauseButton.textContent = '❚❚';
+              let currentMonth = parseInt(slider.noUiSlider.get());
 
               intervalId = setInterval(() => {
                   map.eachLayer(layer => {
@@ -178,7 +208,8 @@
 
                   const filteredObservations = filterObservationsByMonth(observations, currentMonth);
                   addMarkers(filteredObservations);
-                  updateDateDisplay(currentMonth);
+
+                  slider.noUiSlider.set(currentMonth);
 
                   currentMonth++;
                   if (currentMonth === totalMonths) {
@@ -186,7 +217,7 @@
                   }
               }, 1000);
           } else {
-              playButton.textContent = 'Play';
+              playPauseButton.textContent = '►';
               clearInterval(intervalId);
           }
       });
